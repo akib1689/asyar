@@ -2,7 +2,7 @@ import type { Extension, ExtensionContext, IExtensionManager } from 'asyar-sdk/c
 import { ActionContext } from 'asyar-sdk/contracts';
 import type { ExtensionAction, FileHit } from 'asyar-sdk/contracts';
 import { tick } from 'svelte';
-import { revealItemInDir } from '@tauri-apps/plugin-opener';
+import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { writeText } from 'tauri-plugin-clipboard-x-api';
 import { openerService } from '../../services/opener/openerService';
 import { actionService } from '../../services/action/actionService.svelte';
@@ -10,6 +10,8 @@ import { fileManagerService } from '../../services/fileManager/fileManagerServic
 import { searchStores } from '../../services/search/stores/search.svelte';
 import { feedbackService } from '../../services/feedback/feedbackService.svelte';
 import { logService } from '../../services/log/logService';
+import { viewManager } from '../../services/extension/viewManager.svelte';
+import { t } from '../../services/i18n';
 import {
   openInTerminal,
   quickLookPath,
@@ -74,6 +76,12 @@ class FileSearchExtension implements Extension {
 
   async viewActivated(viewPath: string): Promise<void> {
     this.inView = true;
+    // Claim the bottom-bar primary action for the view's duration: a
+    // selected file's Enter opens it with the system default app, so the
+    // hint must read "Open" — and registering it here also overrides the
+    // stale root-search selection label that used to leak in as "Run".
+    // Same pipeline ScriptLibraryView uses for its "Run Script" hint.
+    viewManager.activeViewPrimaryActionLabel = t('actions.open');
     logService.debug(`[FileSearch] view activated: ${viewPath}`);
     if (typeof window !== 'undefined') {
       window.addEventListener('keydown', this.handleKeydownBound);
@@ -120,30 +128,6 @@ class FileSearchExtension implements Extension {
 
   private registerViewActions(): void {
     const actions: ExtensionAction[] = [
-      {
-        id: 'file-search:open',
-        title: 'Open',
-        description: 'Open with the system default app',
-        icon: 'icon:link',
-        extensionId: 'file-search',
-        category: 'file-action',
-        context: ActionContext.EXTENSION_VIEW,
-        execute: async () => {
-          const f = getSelectedFile();
-          if (!f) return;
-          // Same flow as Enter (DefaultView onActivate): feed per-query
-          // learning, then hand off to the OS file association — Preview.app
-          // for PDFs, Numbers for spreadsheets, Finder for executables.
-          // Host-context opener: the webview plugin's JS `openPath` scope
-          // rejects arbitrary `$HOME` paths, the Rust command does not.
-          try {
-            await recordSelectionForCurrentQuery(f.fileId);
-          } catch (err) {
-            logService.debug(`[FileSearch] recordSelectionForCurrentQuery failed: ${err}`);
-          }
-          await openerService.openPath(null, f.path);
-        },
-      },
       {
         id: 'file-search:reveal-in-finder',
         title: 'Reveal in Finder',
@@ -255,6 +239,7 @@ class FileSearchExtension implements Extension {
         title: 'Quick Look',
         description: 'Preview the file',
         icon: 'icon:eye',
+        shortcut: 'Space',
         extensionId: 'file-search',
         category: 'file-action',
         context: ActionContext.EXTENSION_VIEW,
@@ -302,7 +287,6 @@ class FileSearchExtension implements Extension {
   }
 
   private unregisterViewActions(): void {
-    actionService.unregisterAction('file-search:open');
     actionService.unregisterAction('file-search:reveal-in-finder');
     actionService.unregisterAction('file-search:copy-path');
     actionService.unregisterAction('file-search:copy-name');
@@ -319,6 +303,11 @@ class FileSearchExtension implements Extension {
       window.removeEventListener('keydown', this.handleKeydownBound);
     }
     this.unregisterViewActions();
+    // Guarded clear, mirroring ScriptLibraryView: if another view claimed
+    // the label in the interim, leave theirs alone.
+    if (viewManager.activeViewPrimaryActionLabel === t('actions.open')) {
+      viewManager.activeViewPrimaryActionLabel = null;
+    }
     this.inView = false;
     logService.debug(`[FileSearch] view deactivated: ${viewPath}`);
   }
