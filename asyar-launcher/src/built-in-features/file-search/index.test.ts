@@ -11,6 +11,14 @@ vi.mock('../../lib/ipc/fileSearchCommands', () => ({
   fileSearchClearHistory: vi.fn().mockResolvedValue(true),
 }));
 
+vi.mock('../../services/opener/openerService', () => ({
+  openerService: {
+    open: vi.fn().mockResolvedValue(undefined),
+    openPath: vi.fn().mockResolvedValue(undefined),
+    reveal: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
 vi.mock('../../services/fileManager/fileManagerService', () => ({
   fileManagerService: { trash: vi.fn() },
 }));

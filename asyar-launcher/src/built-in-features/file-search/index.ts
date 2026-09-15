@@ -2,8 +2,9 @@ import type { Extension, ExtensionContext, IExtensionManager } from 'asyar-sdk/c
 import { ActionContext } from 'asyar-sdk/contracts';
 import type { ExtensionAction, FileHit } from 'asyar-sdk/contracts';
 import { tick } from 'svelte';
-import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
+import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { writeText } from 'tauri-plugin-clipboard-x-api';
+import { openerService } from '../../services/opener/openerService';
 import { actionService } from '../../services/action/actionService.svelte';
 import { fileManagerService } from '../../services/fileManager/fileManagerService';
 import { searchStores } from '../../services/search/stores/search.svelte';
@@ -102,7 +103,7 @@ class FileSearchExtension implements Extension {
       } catch (err) {
         logService.debug(`[FileSearch] recordSelectionForCurrentQuery failed: ${err}`);
       }
-      await openPath(selected.path);
+      await openerService.openPath(null, selected.path);
       return;
     }
 
@@ -113,12 +114,36 @@ class FileSearchExtension implements Extension {
       event.preventDefault();
       event.stopPropagation();
       const ok = await quickLookPath(selected.path);
-      if (!ok) await openPath(selected.path);
+      if (!ok) await openerService.openPath(null, selected.path);
     }
   }
 
   private registerViewActions(): void {
     const actions: ExtensionAction[] = [
+      {
+        id: 'file-search:open',
+        title: 'Open',
+        description: 'Open with the system default app',
+        icon: 'icon:link',
+        extensionId: 'file-search',
+        category: 'file-action',
+        context: ActionContext.EXTENSION_VIEW,
+        execute: async () => {
+          const f = getSelectedFile();
+          if (!f) return;
+          // Same flow as Enter (DefaultView onActivate): feed per-query
+          // learning, then hand off to the OS file association — Preview.app
+          // for PDFs, Numbers for spreadsheets, Finder for executables.
+          // Host-context opener: the webview plugin's JS `openPath` scope
+          // rejects arbitrary `$HOME` paths, the Rust command does not.
+          try {
+            await recordSelectionForCurrentQuery(f.fileId);
+          } catch (err) {
+            logService.debug(`[FileSearch] recordSelectionForCurrentQuery failed: ${err}`);
+          }
+          await openerService.openPath(null, f.path);
+        },
+      },
       {
         id: 'file-search:reveal-in-finder',
         title: 'Reveal in Finder',
@@ -277,6 +302,7 @@ class FileSearchExtension implements Extension {
   }
 
   private unregisterViewActions(): void {
+    actionService.unregisterAction('file-search:open');
     actionService.unregisterAction('file-search:reveal-in-finder');
     actionService.unregisterAction('file-search:copy-path');
     actionService.unregisterAction('file-search:copy-name');
