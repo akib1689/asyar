@@ -158,6 +158,12 @@
   async function loadPreview(path: string) {
     previewLoading = true;
     currentPreviewPath = path;
+    // Clear BOTH render states before the awaits — otherwise a text file
+    // followed by a binary one keeps rendering the old text (the text
+    // branch is checked before the thumbnail branch), exactly what the
+    // selection change was supposed to replace.
+    previewText = null;
+    previewThumbUrl = null;
     try {
       // Step 1 — bounded text read (via std::fs, not the webview fs scope;
       // binary-sniffed on the Rust side so raw bytes never reach the pane).
